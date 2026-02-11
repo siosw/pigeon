@@ -5,8 +5,8 @@ import { createBot } from "./src/bot.js";
 
 log.info("main", "Starting pigeon...");
 
-const agent = await createAgent(config);
-const bot = createBot(config, agent);
+const { agent, worker } = await createAgent(config);
+const bot = createBot(config, agent, worker);
 
 bot.launch();
 log.info("main", `Bot running. Authorized chat: ${config.chatId}`);
@@ -14,6 +14,7 @@ log.info("main", `Bot running. Authorized chat: ${config.chatId}`);
 // Graceful shutdown
 const shutdown = (signal: string) => {
 	log.info("main", `Received ${signal}, shutting down...`);
+	worker.stop();
 	bot.stop(signal);
 	agent.dispose();
 	process.exit(0);

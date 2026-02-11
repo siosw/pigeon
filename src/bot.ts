@@ -1,6 +1,6 @@
 import { Telegraf } from "telegraf";
 import type { Config } from "./config.js";
-import type { Agent } from "./agent.js";
+import type { Agent, BackgroundWorker } from "./agent.js";
 import { log } from "./logger.js";
 
 const TELEGRAM_MAX_LENGTH = 4096;
@@ -20,7 +20,6 @@ function splitMessage(text: string): string[] {
 			break;
 		}
 
-		// Find a good split point: paragraph break, then newline, then space
 		let splitAt = remaining.lastIndexOf("\n\n", TELEGRAM_MAX_LENGTH);
 		if (splitAt < TELEGRAM_MAX_LENGTH / 2) {
 			splitAt = remaining.lastIndexOf("\n", TELEGRAM_MAX_LENGTH);
@@ -39,12 +38,20 @@ function splitMessage(text: string): string[] {
 	return chunks;
 }
 
-export function createBot(config: Config, agent: Agent) {
+/** Send a message, splitting if needed. */
+async function sendMessage(bot: Telegraf, chatId: number, text: string): Promise<void> {
+	const chunks = splitMessage(text);
+	for (const chunk of chunks) {
+		await bot.telegram.sendMessage(chatId, chunk);
+	}
+}
+
+export function createBot(config: Config, agent: Agent, worker: BackgroundWorker) {
 	const bot = new Telegraf(config.botToken);
 	const messageQueue: Array<{ chatId: number; text: string }> = [];
 	let processing = false;
 
-	// Auth guard: drop all messages not from the authorized chat
+	// Auth guard
 	bot.use((ctx, next) => {
 		const chatId = ctx.chat?.id;
 		if (chatId !== config.chatId) {
@@ -58,25 +65,19 @@ export function createBot(config: Config, agent: Agent) {
 		const startMs = Date.now();
 		log.info("bot", `Message: ${text.slice(0, 100)}${text.length > 100 ? "..." : ""}`);
 
-		// Send typing indicator on an interval
 		const typingInterval = setInterval(() => {
 			bot.telegram.sendChatAction(chatId, "typing").catch(() => {});
 		}, TYPING_INTERVAL_MS);
-
-		// Send first one immediately
 		bot.telegram.sendChatAction(chatId, "typing").catch(() => {});
 
 		try {
 			const response = await agent.prompt(text);
 			clearInterval(typingInterval);
 
-			const chunks = splitMessage(response);
-			for (const chunk of chunks) {
-				await bot.telegram.sendMessage(chatId, chunk);
-			}
+			await sendMessage(bot, chatId, response);
 
 			const elapsed = ((Date.now() - startMs) / 1000).toFixed(1);
-			log.info("bot", `Replied (${elapsed}s, ${response.length} chars, ${chunks.length} msg(s))`);
+			log.info("bot", `Replied (${elapsed}s, ${response.length} chars)`);
 		} catch (err) {
 			clearInterval(typingInterval);
 			const msg = err instanceof Error ? err.message : String(err);
@@ -88,12 +89,10 @@ export function createBot(config: Config, agent: Agent) {
 	async function drainQueue(): Promise<void> {
 		if (processing) return;
 		processing = true;
-
 		while (messageQueue.length > 0) {
 			const item = messageQueue.shift()!;
 			await processMessage(item.chatId, item.text);
 		}
-
 		processing = false;
 	}
 
@@ -113,6 +112,41 @@ export function createBot(config: Config, agent: Agent) {
 	bot.command("reset", async (ctx) => {
 		await agent.reset();
 		ctx.reply("Session reset. Fresh context.");
+	});
+
+	bot.command("todo", (ctx) => {
+		const pending = agent.queue.list("pending");
+		const running = agent.queue.list("running");
+		const recent = agent.queue.list("done").slice(-3);
+
+		const lines: string[] = [];
+
+		if (running.length > 0) {
+			lines.push("Running:");
+			for (const t of running) {
+				lines.push(`  ${t.id}: ${t.description.slice(0, 80)}`);
+			}
+		}
+
+		if (pending.length > 0) {
+			lines.push("Pending:");
+			for (const t of pending) {
+				lines.push(`  ${t.id}: ${t.description.slice(0, 80)}`);
+			}
+		}
+
+		if (recent.length > 0) {
+			lines.push("Recent:");
+			for (const t of recent) {
+				lines.push(`  ${t.id}: ${t.description.slice(0, 80)}`);
+			}
+		}
+
+		if (lines.length === 0) {
+			ctx.reply("No tasks.");
+		} else {
+			ctx.reply(lines.join("\n"));
+		}
 	});
 
 	bot.command("memory", async (ctx) => {
@@ -135,14 +169,23 @@ export function createBot(config: Config, agent: Agent) {
 		const hours = Math.floor(uptime / 3600);
 		const mins = Math.floor((uptime % 3600) / 60);
 		const msgs = agent.session.messages.length;
-		ctx.reply(`Uptime: ${hours}h ${mins}m\nSession messages: ${msgs}`);
+		const pending = agent.queue.list("pending").length;
+		const running = agent.queue.list("running").length;
+		ctx.reply(
+			`Uptime: ${hours}h ${mins}m\nSession messages: ${msgs}\nTasks: ${running} running, ${pending} pending`,
+		);
 	});
 
-	// Text message handler
+	// Text messages
 	bot.on("text", (ctx) => {
 		const text = ctx.message.text;
-		if (!text || text.startsWith("/")) return; // skip unhandled commands
+		if (!text || text.startsWith("/")) return;
 		enqueue(ctx.chat.id, text);
+	});
+
+	// Start background worker — sends results to the authorized chat
+	worker.start(async (text: string) => {
+		await sendMessage(bot, config.chatId, text);
 	});
 
 	return bot;

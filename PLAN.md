@@ -29,19 +29,21 @@ Nothing else. Bun built-ins for fs, env, logging.
 ## Files
 
 ```
-index.ts          entry point: init bot + pi session, wire together
+index.ts          entry point: init bot + pi sessions + worker, wire together
 src/
   bot.ts          telegraf setup, message handler, command registration
-  agent.ts        pi session lifecycle: create, prompt, event streaming
+  agent.ts        two pi sessions (main + background), queue_task tool, worker loop
+  queue.ts        task queue with JSON persistence
   memory.ts       weekly markdown file read/write, old-week loading
   logger.ts       structured logging (timestamp, level, context)
   config.ts       env vars: BOT_TOKEN, CHAT_ID, ANTHROPIC_API_KEY, DATA_DIR, MODEL
 data/             created at runtime
   memory/
     2026-W07.md   one file per ISO week
+  queue.json      task queue state
 ```
 
-~6 source files, each < 150 LOC target.
+~7 source files, ~880 LOC total.
 
 ## Implementation Steps
 
