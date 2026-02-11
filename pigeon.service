@@ -1,0 +1,15 @@
+[Unit]
+Description=Pigeon Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=pigeon
+WorkingDirectory=/opt/pigeon
+ExecStart=/usr/local/bin/bun run index.ts
+Restart=always
+RestartSec=5
+EnvironmentFile=/opt/pigeon/.env
+
+[Install]
+WantedBy=multi-user.target
