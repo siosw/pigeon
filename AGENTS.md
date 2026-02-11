@@ -87,6 +87,24 @@ Rules:
 - Tools must return `{ content: [{ type: "text", text: "..." }], details: {} }`.
 - Keep extensions focused — one concern per file.
 
+## Data Directory
+
+The `data/` directory is the persistent workspace. Use it for all file storage.
+
+```
+data/
+├── memory/           # Weekly memory files (managed by memory tool)
+│   └── 2026-W07.md
+├── queue.json        # Task queue state (managed by queue system)
+├── scratch/          # Working directory for temporary files, downloads, drafts
+└── output/           # Finished artifacts to share with the user
+```
+
+- Use `data/scratch/` for intermediate work: cloned repos, downloaded files, drafts in progress.
+- Use `data/output/` for final deliverables the user asked for.
+- Don't write files outside `data/` unless the user explicitly asks.
+- Clean up `data/scratch/` when done with a task.
+
 ## Git Workflow
 
 - Work directly on dev.
