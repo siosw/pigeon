@@ -105,6 +105,16 @@ data/
 - Don't write files outside `data/` unless the user explicitly asks.
 - Clean up `data/scratch/` when done with a task.
 
+## Service Management
+
+Pigeon runs as a systemd service. To restart yourself after making changes:
+
+```bash
+sudo systemctl restart pigeon
+```
+
+The service auto-restarts on crash. Logs are available via `journalctl -u pigeon -f`.
+
 ## Git Workflow
 
 - Work directly on dev.
